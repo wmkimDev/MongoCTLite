@@ -23,17 +23,16 @@ public sealed class TrackingEntry<T>
 
         Original = entity.ToBsonDocument();
 
-        // _id 체크 개선
+        // Enhanced _id validation
         if (!Original.TryGetValue(IdField, out var id))
             throw new InvalidOperationException($"Entity of type {typeof(T).Name} must have an `{IdField}` field");
         Id = id;
         
-        var v = expectedVersion ?? TryGetVersion(Original);
-        if (v is null)
-            throw new InvalidOperationException("Strict mode: document must contain a numeric `version` field.");
+        var version = expectedVersion ?? TryGetVersion(Original);
+        if (version is null)
+            throw new InvalidOperationException("Document must contain a numeric `version` field.");
 
-        // Version 처리 개선
-        ExpectedVersion = expectedVersion ?? TryGetVersion(Original);
+        ExpectedVersion = version;
     }
     
     private static long? TryGetVersion(BsonDocument doc)

@@ -9,15 +9,49 @@ public sealed class TrackingContext : ITrackingContext
     // Same request scope only. Do not share across multiple threads.
     private readonly List<ITrackingEntry> _entries = new();
 
-    public TrackingEntry<T> Attach<T>(IMongoCollection<T> col, T entity, long? expectedVersion = null)
+    // (Type, Id) -> Entry index for fast lookup
+    private readonly Dictionary<EntryKey, ITrackingEntry> _index = new();
+
+    private readonly record struct EntryKey(Type Type, BsonValue Id);
+
+    private static EntryKey KeyOf<T>(BsonValue id) => new(typeof(T), id);
+
+    public void Attach<T>(IMongoCollection<T> col, T entity, long? expectedVersion = null)
     {
-        var e = new TrackingEntry<T>(col, entity, expectedVersion);
-        _entries.Add(new TrackingEntryAdapter<T>(e));
-        return e;
+        var wrapped = new TrackingEntryAdapter<T>(new TrackingEntry<T>(col, entity, expectedVersion));
+        var key = KeyOf<T>(wrapped.Id);
+
+        if (_index.ContainsKey(key))
+            throw new InvalidOperationException(
+                $"Already attached in this context: {wrapped.CollectionFullName} id={wrapped.Id}");
+
+        _entries.Add(wrapped);
+        _index[key] = wrapped;
     }
 
-    public async Task<int> SaveChangesAsync(DiffPolicy policy, IRunLogger log, CancellationToken ct = default)
-        => await SaveChangesAsync(policy, log, new SaveChangesOptions(), ct);
+    public T GetTrackedEntity<T>(BsonValue id)
+    {
+        if (TryGetTrackedEntity<T>(id, out var entity))
+            return entity;
+
+        throw new InvalidOperationException(
+            $"Entity of type {typeof(T).Name} with id={id} is not being tracked in the current context.");
+    }
+
+    public bool TryGetTrackedEntity<T>(BsonValue id, out T entity)
+    {
+        var key = KeyOf<T>(id);
+        if (_index.TryGetValue(key, out var e))
+        {
+            entity = ((TrackingEntryAdapter<T>)e).Current;
+            return true;
+        }
+        entity = default!;
+        return false;
+    }
+
+    public Task<int> SaveChangesAsync(DiffPolicy policy, IRunLogger log, CancellationToken ct = default)
+        => SaveChangesAsync(policy, log, new SaveChangesOptions(), ct);
 
     public async Task<int> SaveChangesAsync(
         DiffPolicy policy,
@@ -28,20 +62,19 @@ public sealed class TrackingContext : ITrackingContext
         if (_entries.Count == 0)
             return 0;
 
-        // Same document cannot be updated multiple times within the same context.
-        var seen = new HashSet<(string Col, string IdStr)>();
+        // Block duplicate updates to the same document in one context
+        var seen = new HashSet<(string Col, BsonValue Id)>();
         var modelsByCol = new Dictionary<IMongoCollection<BsonDocument>, List<WriteModel<BsonDocument>>>();
 
         foreach (var entry in _entries)
         {
             var model = entry.BuildModel(policy);
-            if (model is null)
-                continue;
+            if (model is null) continue;
 
-            var key = (entry.CollectionFullName, entry.Id.ToString());
-            if (!seen.Add(key!))
-                throw new InvalidOperationException($"The same document cannot be updated multiple times within the same context: {key.CollectionFullName}");
-            
+            var dupKey = (entry.CollectionFullName, entry.Id);
+            if (!seen.Add(dupKey))
+                throw new InvalidOperationException($"Duplicated update in this context: {entry.CollectionFullName} id={entry.Id}");
+
             if (!modelsByCol.TryGetValue(entry.BsonCollection, out var list))
             {
                 list = new List<WriteModel<BsonDocument>>();
@@ -52,19 +85,20 @@ public sealed class TrackingContext : ITrackingContext
 
         if (modelsByCol.Count == 0)
         {
-            _entries.Clear();
+            ClearState();
             return 0;
         }
 
-        var totalReq     = 0;
+        var totalReq = 0;
         var totalMatched = 0;
 
         IClientSessionHandle? session = null;
+
         try
         {
             if (options.UseTransaction)
             {
-                var anyCol = modelsByCol.Keys.First(); // 같은 클러스터라는 전제
+                var anyCol = modelsByCol.Keys.First(); // 동일 클러스터 가정
                 session = await anyCol.Database.Client.StartSessionAsync(cancellationToken: ct);
                 session.StartTransaction();
             }
@@ -73,9 +107,10 @@ public sealed class TrackingContext : ITrackingContext
             {
                 ct.ThrowIfCancellationRequested();
 
-                var opts = new BulkWriteOptions { IsOrdered = options.Ordered };
-
-                var res = await DoBulkWithRetry(col, session, models, opts, options.MaxRetries, log, ct);
+                var res = await DoBulkWithRetry(
+                    col, session, models,
+                    new BulkWriteOptions { IsOrdered = options.Ordered },
+                    options.MaxRetries, log, ct);
 
                 totalReq     += models.Count;
                 totalMatched += (int)res.MatchedCount;
@@ -86,7 +121,6 @@ public sealed class TrackingContext : ITrackingContext
             if (options.UseTransaction && session is not null)
                 await session.CommitTransactionAsync(ct);
 
-            // Strict: _id+version 필터 미매치는 논리적 충돌
             var conflicts = totalReq - totalMatched;
             if (conflicts > 0)
                 throw new ConcurrencyConflictException(conflicts, $"Optimistic concurrency conflict: {conflicts} item(s) not matched by _id+version.");
@@ -99,14 +133,20 @@ public sealed class TrackingContext : ITrackingContext
             {
                 try { await session.AbortTransactionAsync(ct); } catch { /* ignore */ }
             }
-            log.Error(ex, "SaveChanges 실패");
+            log.Error(ex, "SaveChanges failed");
             throw;
         }
         finally
         {
             session?.Dispose();
-            _entries.Clear(); 
+            ClearState();
         }
+    }
+
+    private void ClearState()
+    {
+        _entries.Clear();
+        _index.Clear();
     }
 
     private static async Task<BulkWriteResult<BsonDocument>> DoBulkWithRetry(
@@ -124,16 +164,15 @@ public sealed class TrackingContext : ITrackingContext
         {
             try
             {
-                if (session is null)
-                    return await col.BulkWriteAsync(models, opts, ct).ConfigureAwait(false);
-                else
-                    return await col.BulkWriteAsync(session, models, opts, ct).ConfigureAwait(false);
+                return session is null
+                    ? await col.BulkWriteAsync(models, opts, ct).ConfigureAwait(false)
+                    : await col.BulkWriteAsync(session, models, opts, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (IsTransient(ex) && attempt < maxRetries)
             {
-                log.Warn($"Transient error detected, retrying {attempt + 1}/{maxRetries}: {ex.GetType().Name}");
+                log.Warn($"Transient error, retry {attempt + 1}/{maxRetries}: {ex.GetType().Name}");
                 await Task.Delay(delay, ct);
-                delay += delay;
+                delay += delay; // 지수 백오프
             }
         }
     }

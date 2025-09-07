@@ -4,16 +4,16 @@ using MongoDB.Driver;
 namespace MongoCTLite.Diff;
 
 /// <summary>
-/// MongoDB Update 연산 컨테이너
+/// MongoDB Update operation container
 /// </summary>
 public sealed class UpdateOps
 {
-    // 필드 연산
+    // Field Operations
     public Dictionary<string, BsonValue> Sets   { get; } = new();
     public HashSet<string>               Unsets { get; } = new();
     public Dictionary<string, long>      Incs   { get; } = new();
     
-    // 배열 연산
+    // Array Operations
     public Dictionary<string, List<BsonValue>> Pushes { get; } = new();
     public Dictionary<string, List<BsonValue>> Pulls  { get; } = new();
     

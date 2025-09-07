@@ -3,14 +3,14 @@ namespace MongoCTLite.Diff;
 public static class PathUtils
 {
     /// <summary>
-    /// MongoDB 필드 경로 조합
+    /// Combine MongoDB field paths
     /// </summary>
     public static string Join(string prefix, string key)
     {
         if (string.IsNullOrEmpty(prefix))
             return key;
         
-        // 배열 인덱스는 바로 붙임
+        // Array indices are concatenated directly
         if (key.StartsWith("["))
             return $"{prefix}{key}";
             

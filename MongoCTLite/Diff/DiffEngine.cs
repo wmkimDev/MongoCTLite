@@ -65,7 +65,7 @@ public static class DiffEngine
             currentKeys.ExceptWith(ReservedRootKeys);
         }
         
-        // 삭제된 필드
+        // Deleted fields
         foreach (var key in originalKeys.Except(currentKeys))
         {
             var path = Join(prefix, key);
@@ -76,7 +76,7 @@ public static class DiffEngine
                 ops.Sets[path] = BsonNull.Value;
         }
         
-        // 현재 필드
+        // Current fields
         foreach (var key in currentKeys)
         {
             var path = Join(prefix, key);
@@ -167,7 +167,7 @@ public static class DiffEngine
             return;
         }
         
-        // 변화율 체크
+        // Check change ratio
         var changeRatio = CalculateChangeRatio(original, current);
         if (changeRatio >= policy.ArrayChangeRatioForReplace)
         {

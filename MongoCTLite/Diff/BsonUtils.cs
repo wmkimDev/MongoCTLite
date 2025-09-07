@@ -39,7 +39,7 @@ public static class BsonUtils
     }
     
     /// <summary>
-    /// 두 BSON 값이 동일한지 비교
+    /// Compares two BSON values for equality
     /// </summary>
     public static bool Equals(BsonValue a, BsonValue b)
     {
