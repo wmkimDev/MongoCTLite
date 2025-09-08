@@ -9,10 +9,6 @@ public static class PathUtils
     {
         if (string.IsNullOrEmpty(prefix))
             return key;
-        
-        // Array indices are concatenated directly
-        if (key.StartsWith("["))
-            return $"{prefix}{key}";
             
         return $"{prefix}.{key}";
     }

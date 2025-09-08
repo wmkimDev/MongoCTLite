@@ -172,7 +172,7 @@ public sealed class TrackingContext : ITrackingContext
             {
                 log.Warn($"Transient error, retry {attempt + 1}/{maxRetries}: {ex.GetType().Name}");
                 await Task.Delay(delay, ct);
-                delay += delay; // 지수 백오프
+                delay += delay;
             }
         }
     }

@@ -10,9 +10,6 @@ namespace MongoCTLite.Diff;
 
 public static class DiffEngine
 {
-    private static readonly HashSet<string> ReservedRootKeys =
-        new(StringComparer.Ordinal) { "_id", "version" };
-    
     public static WriteModel<BsonDocument>? BuildModel<T>(
         TrackingEntry<T> e, 
         DiffPolicy policy)
@@ -23,10 +20,10 @@ public static class DiffEngine
         if (current.TryGetValue(e.IdField, out var incomingId) && incomingId != e.Id)
             throw new InvalidOperationException($"`{e.IdField}` field cannot be modified.");
         
-        if (!current.Contains("_id"))
-            current["_id"] = e.Id;
         
-        var ops = ComputeDiff(original, current, policy);
+        var reservedRoot = new HashSet<string> { e.IdField, "version" };
+        
+        var ops = ComputeDiff(original, current, policy, reservedRoot);
         
         if (ops.IsEmpty)
             return null;
@@ -42,10 +39,11 @@ public static class DiffEngine
     private static UpdateOps ComputeDiff(
         BsonDocument original, 
         BsonDocument current, 
-        DiffPolicy policy)
+        DiffPolicy policy,
+        ISet<string> reservedRoot)
     {
         var ops = new UpdateOps();
-        DiffDocument("", original, current, ops, policy);
+        DiffDocument("", original, current, ops, policy, reservedRoot);
         return ops;
     }
     
@@ -54,15 +52,16 @@ public static class DiffEngine
         BsonDocument original,
         BsonDocument current,
         UpdateOps ops,
-        DiffPolicy policy)
+        DiffPolicy policy,
+        ISet<string> reservedRoot)
     {
         var originalKeys = original.Names.ToHashSet();
         var currentKeys = current.Names.ToHashSet();
         
         if (prefix.Length == 0)
         {
-            originalKeys.ExceptWith(ReservedRootKeys);
-            currentKeys.ExceptWith(ReservedRootKeys);
+            originalKeys.ExceptWith(reservedRoot);
+            currentKeys.ExceptWith(reservedRoot);
         }
         
         // Deleted fields
@@ -88,7 +87,7 @@ public static class DiffEngine
                 continue;
             }
             
-            DiffValue(path, originalValue, currentValue, ops, policy);
+            DiffValue(path, originalValue, currentValue, ops, policy, reservedRoot);
         }
     }
 
@@ -97,7 +96,8 @@ public static class DiffEngine
         BsonValue original,
         BsonValue current,
         UpdateOps ops,
-        DiffPolicy policy)
+        DiffPolicy policy,
+        ISet<string> reservedRoot)
     {
         if (Equals(original, current))
             return;
@@ -105,7 +105,7 @@ public static class DiffEngine
         switch ((original.BsonType, current.BsonType))
         {
             case (BsonType.Document, BsonType.Document):
-                DiffDocument(path, original.AsBsonDocument, current.AsBsonDocument, ops, policy);
+                DiffDocument(path, original.AsBsonDocument, current.AsBsonDocument, ops, policy, reservedRoot);
                 break;
             
             case (BsonType.Array, BsonType.Array):
@@ -113,7 +113,7 @@ public static class DiffEngine
                 break;
             
             case var types when AreBothNumeric(original, current):
-                if (policy.AllowInc(path))
+                if (policy.AllowInc(path) && (current.IsInt32 || current.IsInt64 ))
                 {
                     var delta = ToInt64Safe(current) - ToInt64Safe(original);
                     if (delta != 0)
@@ -187,14 +187,18 @@ public static class DiffEngine
         if (current.TryGetValue(e.IdField, out var incomingId) && incomingId != e.Id)
             throw new InvalidOperationException($"`{e.IdField}` field cannot be modified.");
 
-        current[e.IdField] = e.Id;
-        current["version"] = e.ExpectedVersion!.Value + 1;
-        var filter = f.Eq(e.IdField, e.Id) & f.Eq("version", e.ExpectedVersion!.Value);
-
-        return new ReplaceOneModel<BsonDocument>(filter, current)
+        var replacement = new BsonDocument();
+        foreach (var el in current)
         {
-            IsUpsert = false
-        };
+            if (el.Name == e.IdField || el.Name == "version") continue;
+            replacement.Add(el);
+        }
+
+        replacement[e.IdField] = e.Id;
+        replacement["version"] = e.ExpectedVersion!.Value + 1;
+
+        var filter = f.Eq(e.IdField, e.Id) & f.Eq("version", e.ExpectedVersion!.Value);
+        return new ReplaceOneModel<BsonDocument>(filter, replacement) { IsUpsert = false };
     }
     
     private static UpdateOneModel<BsonDocument> CreateUpdateModel<T>(
