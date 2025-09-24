@@ -1,3 +1,4 @@
+using System;
 using MongoDB.Bson;
 using MongoDB.Driver;
 
@@ -11,15 +12,25 @@ public sealed class TrackingEntry<T>
     public BsonValue                      Id              { get; }
     public long?                          ExpectedVersion { get; }
     
-    internal string       IdField  { get; }
-    internal BsonDocument Original { get; }
+    internal string       IdField      { get; }
+    internal string       VersionField { get; }
+    internal BsonDocument Original     { get; }
 
-    public TrackingEntry(IMongoCollection<T> col, T entity, long? expectedVersion = null, string idField = "_id")
+    public TrackingEntry(
+        IMongoCollection<T> col,
+        T entity,
+        long? expectedVersion = null,
+        string idField = "_id",
+        string versionField = "version")
     {
         Collection     = col;
         BsonCollection = col.Database.GetCollection<BsonDocument>(col.CollectionNamespace.CollectionName);
         Current        = entity;
-        IdField       = idField;
+        IdField        = idField;
+        VersionField   = versionField;
+
+        if (string.Equals(IdField, VersionField, StringComparison.Ordinal))
+            throw new InvalidOperationException("Id field and version field cannot be the same.");
 
         Original = entity.ToBsonDocument();
 
@@ -27,19 +38,19 @@ public sealed class TrackingEntry<T>
         if (!Original.TryGetValue(IdField, out var id))
             throw new InvalidOperationException($"Entity of type {typeof(T).Name} must have an `{IdField}` field");
         Id = id;
-        
-        var version = expectedVersion ?? TryGetVersion(Original);
-        if (version is null)
-            throw new InvalidOperationException("Document must contain a numeric `version` field.");
 
-        ExpectedVersion = version;
+        var version = expectedVersion ?? TryGetVersion(Original, VersionField);
+        if (version is null)
+            throw new InvalidOperationException($"Document must contain a numeric `{VersionField}` field.");
+
+        ExpectedVersion  = version;
     }
-    
-    private static long? TryGetVersion(BsonDocument doc)
+
+    private static long? TryGetVersion(BsonDocument doc, string versionField)
     {
-        if (!doc.TryGetValue("version", out var v))
+        if (!doc.TryGetValue(versionField, out var v))
             return null;
-            
+
         return v.BsonType switch
         {
             BsonType.Int32 => v.AsInt32,

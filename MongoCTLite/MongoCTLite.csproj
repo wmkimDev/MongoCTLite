@@ -11,4 +11,8 @@
       <PackageReference Include="MongoDB.Driver" Version="3.4.3" />
     </ItemGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="..\MongoCTLite.SourceGeneration\MongoCTLite.SourceGeneration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
 </Project>

@@ -13,7 +13,7 @@ Lightweight change tracking and diff-based updates for MongoDB with optimistic c
 
 - **ID Field**  
   The identifier field does not have to be MongoDB’s default `_id`.  
-  You can configure which field acts as the entity’s key.
+  Annotate the member with `[MongoIdField]` (and `[MongoVersionField]`) to configure the tracked key and version column.
 
 - **Diff Engine**  
   - Skips reserved keys (ID and `version`).  
@@ -32,15 +32,25 @@ Lightweight change tracking and diff-based updates for MongoDB with optimistic c
 
 ### Entity Example
 
+Annotate tracked documents once. The source generator picks up the attributes during build and registers the metadata automatically.
+
 ```cs
-public class Player
+[MongoTrackedEntity]
+public sealed class Player
 {
-    [BsonId] public ObjectId Id { get; set; } // or your own custom key
-    public long version { get; set; }         // required
+    [BsonId]
+    [MongoIdField] public ObjectId Id { get; set; }
+
+    [MongoVersionField] public long version { get; set; }
+
     public int Level { get; set; }
     public long Gold { get; set; }
 }
 ```
+
+For alternative keys or version column names, place `[MongoIdField]` / `[MongoVersionField]` on the appropriate properties (they respect `[BsonElement]` when present).
+
+> The analyzer packaged with MongoCTLite discovers these attributes at build time and emits a module initializer that registers the metadata automatically—no manual wiring required.
 
 ### Attaching and Saving
 ```cs
@@ -55,8 +65,12 @@ player.Gold += 100;
 
 // Save changes (diffs automatically generated)
 await ctx.SaveChangesAsync(
-    new DiffPolicy(AllowIncPath: path => path == "Gold"),
+    DiffPolicy.WithInc(nameof(Player.Gold)),
     new ConsoleLogger());
+
+// NOTE: TrackingContext clears its state after SaveChangesAsync and does not
+//       mutate the in-memory entity's version. Update it manually or reload
+//       from MongoDB if you need the new version value.
 ```
 
 ### Conflict Detection
@@ -78,7 +92,7 @@ Inside the same TrackingContext, you can fetch an entity that was already attach
 var tracked = ctx.GetTrackedEntity<Player>(player.Id);
 
 // Or safely with TryGet
-if (ctx.TryGetTrackedEntity(players, player.Id, out var trackedPlayer))
+if (ctx.TryGetTrackedEntity<Player>(player.Id, out var trackedPlayer))
 {
     trackedPlayer.Level += 5;
 }

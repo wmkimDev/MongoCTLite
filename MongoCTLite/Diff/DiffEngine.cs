@@ -21,7 +21,7 @@ public static class DiffEngine
             throw new InvalidOperationException($"`{e.IdField}` field cannot be modified.");
         
         
-        var reservedRoot = new HashSet<string> { e.IdField, "version" };
+        var reservedRoot = new HashSet<string> { e.IdField, e.VersionField };
         
         var ops = ComputeDiff(original, current, policy, reservedRoot);
         
@@ -109,18 +109,30 @@ public static class DiffEngine
                 break;
             
             case (BsonType.Array, BsonType.Array):
-                DiffArray(path, original.AsBsonArray, current.AsBsonArray, ops, policy);
+                DiffArray(path, original.AsBsonArray, current.AsBsonArray, ops);
                 break;
             
             case var types when AreBothNumeric(original, current):
-                if (policy.AllowInc(path) && (current.IsInt32 || current.IsInt64 ))
+                if (policy.AllowInc(path) && TryComputeIncrement(original, current, out var numericDelta))
                 {
-                    var delta = ToInt64Safe(current) - ToInt64Safe(original);
-                    if (delta != 0)
+                    if (numericDelta.Value != 0)
                     {
-                        ops.Incs[path] = ops.Incs.TryGetValue(path, out var existing) 
-                            ? existing + delta 
-                            : delta;
+                        if (ops.Incs.TryGetValue(path, out var existing))
+                        {
+                            if (existing.Type != numericDelta.Type)
+                            {
+                                ops.Incs.Remove(path);
+                                ops.Sets[path] = current;
+                            }
+                            else
+                            {
+                                ops.Incs[path] = existing.Add(numericDelta.Value);
+                            }
+                        }
+                        else
+                        {
+                            ops.Incs[path] = numericDelta;
+                        }
                     }
                 }
                 else
@@ -146,8 +158,7 @@ public static class DiffEngine
         string path,
         BsonArray original,
         BsonArray current,
-        UpdateOps ops,
-        DiffPolicy policy)
+        UpdateOps ops)
     {
         // Append-only
         if (IsAppendOnly(original, current))
@@ -157,7 +168,7 @@ public static class DiffEngine
                 ops.Pushes[path] = appended;
             return;
         }
-        
+
         // Remove-only
         if (IsRemoveOnly(original, current))
         {
@@ -166,17 +177,9 @@ public static class DiffEngine
                 ops.Pulls[path] = removed;
             return;
         }
-        
-        // Check change ratio
-        var changeRatio = CalculateChangeRatio(original, current);
-        if (changeRatio >= policy.ArrayChangeRatioForReplace)
-        {
-            ops.Sets[path] = current;
-        }
-        else
-        {
-            ops.Sets[path] = current;
-        }
+
+        // Mixed changes → replace the whole array for deterministic behaviour
+        ops.Sets[path] = current;
     }
     
     private static WriteModel<BsonDocument> CreateReplaceModel<T>(
@@ -190,17 +193,17 @@ public static class DiffEngine
         var replacement = new BsonDocument();
         foreach (var el in current)
         {
-            if (el.Name == e.IdField || el.Name == "version") continue;
+            if (el.Name == e.IdField || el.Name == e.VersionField) continue;
             replacement.Add(el);
         }
 
         replacement[e.IdField] = e.Id;
-        replacement["version"] = e.ExpectedVersion!.Value + 1;
+        replacement[e.VersionField] = e.ExpectedVersion!.Value + 1;
 
-        var filter = f.Eq(e.IdField, e.Id) & f.Eq("version", e.ExpectedVersion!.Value);
+        var filter = f.Eq(e.IdField, e.Id) & f.Eq(e.VersionField, e.ExpectedVersion!.Value);
         return new ReplaceOneModel<BsonDocument>(filter, replacement) { IsUpsert = false };
     }
-    
+
     private static UpdateOneModel<BsonDocument> CreateUpdateModel<T>(
         TrackingEntry<T> e, UpdateOps ops)
     {
@@ -213,7 +216,11 @@ public static class DiffEngine
             updates.Add(Builders<BsonDocument>.Update.Unset(path));
 
         foreach (var (path, delta) in ops.Incs)
-            updates.Add(Builders<BsonDocument>.Update.Inc(path, delta));
+        {
+            updates.Add(delta.Type == BsonType.Int32
+                ? Builders<BsonDocument>.Update.Inc(path, checked((int)delta.Value))
+                : Builders<BsonDocument>.Update.Inc(path, delta.Value));
+        }
 
         foreach (var (path, values) in ops.Pushes)
             updates.Add(values.Count == 1
@@ -225,14 +232,35 @@ public static class DiffEngine
                 ? Builders<BsonDocument>.Update.Pull(path, values[0])
                 : Builders<BsonDocument>.Update.PullAll(path, values));
 
-        updates.Add(Builders<BsonDocument>.Update.Inc("version", 1));
+        updates.Add(Builders<BsonDocument>.Update.Inc(e.VersionField, 1));
 
         var f      = Builders<BsonDocument>.Filter;
-        var filter = f.Eq(e.IdField, e.Id) & f.Eq("version", e.ExpectedVersion!.Value);
+        var filter = f.Eq(e.IdField, e.Id) & f.Eq(e.VersionField, e.ExpectedVersion!.Value);
 
         return new UpdateOneModel<BsonDocument>(filter, Builders<BsonDocument>.Update.Combine(updates))
         {
             IsUpsert = false
         };
+}
+
+    private static bool TryComputeIncrement(BsonValue original, BsonValue current, out NumericDelta delta)
+    {
+        delta = default;
+
+        if (original.BsonType == BsonType.Int32 && current.BsonType == BsonType.Int32)
+        {
+            var diff = current.AsInt32 - original.AsInt32;
+            delta = new NumericDelta(diff, BsonType.Int32);
+            return true;
+        }
+
+        if (original.BsonType == BsonType.Int64 && current.BsonType == BsonType.Int64)
+        {
+            var diff = current.AsInt64 - original.AsInt64;
+            delta = new NumericDelta(diff, BsonType.Int64);
+            return true;
+        }
+
+        return false;
     }
 }

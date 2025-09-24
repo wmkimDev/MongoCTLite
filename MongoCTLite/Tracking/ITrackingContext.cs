@@ -9,7 +9,9 @@ namespace MongoCTLite.Tracking;
 public interface ITrackingContext
 {
     /// <summary>
-    /// Attach an entity (start snapshot tracking)
+    /// Attach an entity (start snapshot tracking). The entity type must be annotated with
+    /// <see cref="MongoTrackedEntityAttribute"/> and define members marked with
+    /// <see cref="MongoIdFieldAttribute"/> and <see cref="MongoVersionFieldAttribute"/>.
     /// </summary>
     void Attach<T>(IMongoCollection<T> col, T entity, long? expectedVersion = null);
 

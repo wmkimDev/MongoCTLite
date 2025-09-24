@@ -42,7 +42,7 @@ dotnet pack MongoCTLite/MongoCTLite.csproj --configuration Release
 
 **TrackingContext (`ITrackingContext`)**: The main Unit of Work implementation that manages multiple tracked entities and executes bulk operations with optimistic concurrency control.
 
-**TrackingEntry<T>**: Represents a tracked MongoDB document with snapshot capabilities for change detection. Requires documents to have `_id` and `version` fields.
+**TrackingEntry<T>**: Represents a tracked MongoDB document with snapshot capabilities for change detection. Entities are annotated with `[MongoTrackedEntity]`, `[MongoIdField]`, and `[MongoVersionField]` so the source generator can register their metadata.
 
 **DiffEngine**: The heart of the change detection system that analyzes differences between original and current document states, generating optimized MongoDB update operations.
 

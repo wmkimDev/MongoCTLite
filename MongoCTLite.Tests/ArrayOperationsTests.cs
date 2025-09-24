@@ -84,6 +84,36 @@ public sealed class ArrayOperationsTests
     }
 
     [Fact]
+    public async Task SaveChanges_ArrayRemove_WithDuplicates_RemovesCorrectCount()
+    {
+        var p = new Player
+        {
+            Id = ObjectId.GenerateNewId(),
+            version = 1,
+            level = 10,
+            gold = 100,
+            items = new List<string> { "sword", "sword", "shield" }
+        };
+        await _col.InsertOneAsync(p);
+
+        var ctx = new TrackingContext();
+        ctx.Attach(_col, p, expectedVersion: 1);
+
+        // Remove a single duplicate and one unique item
+        p.items.Remove("sword");
+        p.items.Remove("shield");
+
+        var result = await ctx.SaveChangesAsync(new DiffPolicy(), new NoopLogger());
+
+        result.ShouldBe(1);
+
+        var doc = await _bsonCol.Find(Builders<BsonDocument>.Filter.Eq("_id", p.Id)).FirstAsync();
+        var items = doc["items"].AsBsonArray.Select(x => x.AsString).ToList();
+        items.ShouldBe(new[] { "sword" });
+        doc["version"].AsInt64.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task SaveChanges_ArrayMixedChanges_UsesReplacement()
     {
         // Arrange
@@ -113,39 +143,6 @@ public sealed class ArrayOperationsTests
         var doc = await _bsonCol.Find(Builders<BsonDocument>.Filter.Eq("_id", p.Id)).FirstAsync();
         var items = doc["items"].AsBsonArray.Select(x => x.AsString).ToList();
         items.ShouldBe(new[] { "magic_sword", "potion", "bow" });
-        doc["version"].AsInt64.ShouldBe(2);
-    }
-
-    [Fact]
-    public async Task SaveChanges_ArrayChangeRatio_ForcesReplacement()
-    {
-        // Arrange
-        var p = new Player 
-        { 
-            Id = ObjectId.GenerateNewId(), 
-            version = 1, 
-            level = 10, 
-            gold = 100,
-            items = new List<string> { "item1", "item2", "item3", "item4", "item5" }
-        };
-        await _col.InsertOneAsync(p);
-
-        var ctx = new TrackingContext();
-        ctx.Attach(_col, p, expectedVersion: 1);
-
-        // Act - Change more than the threshold
-        p.items.Add("item6");
-        p.items.Add("item7");
-
-        var policy = new DiffPolicy(ArrayChangeRatioForReplace: 0.2); // Low threshold
-        var result = await ctx.SaveChangesAsync(policy, new NoopLogger());
-
-        // Assert
-        result.ShouldBe(1);
-        
-        var doc = await _bsonCol.Find(Builders<BsonDocument>.Filter.Eq("_id", p.Id)).FirstAsync();
-        var items = doc["items"].AsBsonArray.Select(x => x.AsString).ToList();
-        items.Count.ShouldBe(7);
         doc["version"].AsInt64.ShouldBe(2);
     }
 

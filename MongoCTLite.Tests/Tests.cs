@@ -2,6 +2,7 @@ using MongoCTLite.Abstractions;
 using MongoCTLite.Tests;
 using MongoCTLite.Tracking;
 using MongoDB.Bson;
+using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
 using Shouldly;
 
@@ -15,9 +16,11 @@ public sealed partial class Tests
 {
     private readonly IMongoCollection<Player> _col;
     private readonly IMongoCollection<BsonDocument> _bsonCol;
+    private readonly MongoFixture _fixture;
 
     public Tests(MongoFixture fx)
     {
+        _fixture = fx;
         _col = fx.Db.GetCollection<Player>("players_" + ObjectId.GenerateNewId().ToString()[..6]);
         _bsonCol = fx.Db.GetCollection<BsonDocument>(_col.CollectionNamespace.CollectionName);
         _col.Indexes.CreateOne(new CreateIndexModel<Player>(Builders<Player>.IndexKeys.Ascending(x => x.Id)));
@@ -37,7 +40,7 @@ public sealed partial class Tests
         p.gold  = 90;
 
         // Save changes (should succeed)
-        var policy = new DiffPolicy(AllowIncPath: path => path == "gold");
+        var policy = DiffPolicy.WithInc(nameof(Player.gold));
         var n1 = await ctx.SaveChangesAsync(policy, new NoopLogger());
         n1.ShouldBe(1);
 
@@ -127,7 +130,7 @@ public sealed partial class Tests
         p.gold += 50; // Should use $inc if policy allows
 
         // Act
-        var policy = new DiffPolicy(AllowIncPath: path => path == "gold");
+        var policy = DiffPolicy.WithInc(nameof(Player.gold));
         var result = await ctx.SaveChangesAsync(policy, new NoopLogger());
 
         // Assert
@@ -173,5 +176,98 @@ public sealed partial class Tests
             doc["version"].AsInt64.ShouldBe(2); // Version incremented
             doc["level"].AsInt32.ShouldBeGreaterThan(10); // Level modified
         }
+    }
+
+    [Fact]
+    public async Task Attach_WithCustomIdField_UsesProvidedKey()
+    {
+        var collectionName = "custom_players_" + ObjectId.GenerateNewId().ToString()[..6];
+        var col = _fixture.Db.GetCollection<CustomKeyPlayer>(collectionName);
+        var bsonCol = _fixture.Db.GetCollection<BsonDocument>(collectionName);
+
+        var entity = new CustomKeyPlayer
+        {
+            Id = ObjectId.GenerateNewId(),
+            PlayerId = "p01",
+            version = 1,
+            score = 10
+        };
+        await col.InsertOneAsync(entity);
+
+        var ctx = new TrackingContext();
+        ctx.Attach(col, entity, expectedVersion: 1);
+        entity.score += 5;
+
+        var result = await ctx.SaveChangesAsync(
+            DiffPolicy.WithInc(nameof(CustomKeyPlayer.score)),
+            new NoopLogger());
+
+        result.ShouldBe(1);
+
+        var doc = await bsonCol.Find(Builders<BsonDocument>.Filter.Eq("playerId", entity.PlayerId)).FirstAsync();
+        doc["score"].AsInt32.ShouldBe(15);
+        doc["version"].AsInt64.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Attach_WithCustomVersionField_UsesProvidedVersion()
+    {
+        var collectionName = "revision_players_" + ObjectId.GenerateNewId().ToString()[..6];
+        var col = _fixture.Db.GetCollection<CustomVersionPlayer>(collectionName);
+        var bsonCol = _fixture.Db.GetCollection<BsonDocument>(collectionName);
+
+        var entity = new CustomVersionPlayer
+        {
+            Id = ObjectId.GenerateNewId(),
+            Revision = 5,
+            Level = 20,
+            Gold = 500
+        };
+        await col.InsertOneAsync(entity);
+
+        var ctx = new TrackingContext();
+        ctx.Attach(col, entity, expectedVersion: 5);
+        entity.Level += 1;
+        entity.Gold += 200;
+
+        var result = await ctx.SaveChangesAsync(
+            DiffPolicy.WithInc(nameof(CustomVersionPlayer.Gold)),
+            new NoopLogger());
+
+        result.ShouldBe(1);
+
+        var doc = await bsonCol.Find(Builders<BsonDocument>.Filter.Eq("_id", entity.Id)).FirstAsync();
+        doc["revision"].AsInt64.ShouldBe(6);
+        doc["Level"].AsInt32.ShouldBe(21);
+        doc["Gold"].AsInt64.ShouldBe(700);
+    }
+
+    [Fact]
+    public async Task Attach_UntrackedType_Throws()
+    {
+        var collectionName = "untracked_players_" + ObjectId.GenerateNewId().ToString()[..6];
+        var col = _fixture.Db.GetCollection<UntrackedPlayer>(collectionName);
+
+        var entity = new UntrackedPlayer
+        {
+            Id = ObjectId.GenerateNewId(),
+            Version = 0
+        };
+        await col.InsertOneAsync(entity);
+
+        var ctx = new TrackingContext();
+
+        Should.Throw<InvalidOperationException>(() =>
+        {
+            ctx.Attach(col, entity, expectedVersion: 0);
+        });
+    }
+
+    private sealed class UntrackedPlayer
+    {
+        [BsonId]
+        public ObjectId Id { get; set; }
+
+        public long Version { get; set; }
     }
 }

@@ -5,16 +5,16 @@ using MongoDB.Bson.Serialization.Attributes;
 namespace MongoCTLite.Tests;
 
 [MongoTrackedEntity]
-public sealed class Player
+public sealed class CustomVersionPlayer
 {
     [BsonId]
     [MongoIdField]
     public ObjectId Id { get; set; }
 
+    [BsonElement("revision")]
     [MongoVersionField]
-    public long version { get; set; }
+    public long Revision { get; set; }
 
-    public int level { get; set; }
-    public long gold { get; set; }
-    public List<string> items { get; set; } = new();
+    public int Level { get; set; }
+    public long Gold { get; set; }
 }

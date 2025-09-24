@@ -1,3 +1,4 @@
+using System;
 using MongoCTLite.Abstractions;
 using MongoDB.Bson;
 using MongoDB.Driver;
@@ -15,10 +16,18 @@ public sealed class TrackingContext : ITrackingContext
     private readonly record struct EntryKey(Type Type, BsonValue Id);
 
     private static EntryKey KeyOf<T>(BsonValue id) => new(typeof(T), id);
+    private static BsonValue NormalizeId(object id)
+    {
+        if (id is null)
+            throw new ArgumentNullException(nameof(id));
+
+        return id is BsonValue bson ? bson : BsonValue.Create(id);
+    }
 
     public void Attach<T>(IMongoCollection<T> col, T entity, long? expectedVersion = null)
     {
-        var wrapped = new TrackingEntryAdapter<T>(new TrackingEntry<T>(col, entity, expectedVersion));
+        var metadata = TrackingMetadataRegistry.GetOrThrow(typeof(T));
+        var wrapped = new TrackingEntryAdapter<T>(new TrackingEntry<T>(col, entity, expectedVersion, metadata.IdField, metadata.VersionField));
         var key = KeyOf<T>(wrapped.Id);
 
         if (_index.ContainsKey(key))
@@ -29,7 +38,7 @@ public sealed class TrackingContext : ITrackingContext
         _index[key] = wrapped;
     }
 
-    public T GetTrackedEntity<T>(BsonValue id)
+    public T GetTrackedEntity<T>(object id)
     {
         if (TryGetTrackedEntity<T>(id, out var entity))
             return entity;
@@ -38,9 +47,9 @@ public sealed class TrackingContext : ITrackingContext
             $"Entity of type {typeof(T).Name} with id={id} is not being tracked in the current context.");
     }
 
-    public bool TryGetTrackedEntity<T>(BsonValue id, out T entity)
+    public bool TryGetTrackedEntity<T>(object id, out T entity)
     {
-        var key = KeyOf<T>(id);
+        var key = KeyOf<T>(NormalizeId(id));
         if (_index.TryGetValue(key, out var e))
         {
             entity = ((TrackingEntryAdapter<T>)e).Current;

@@ -2,10 +2,7 @@
 	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=7020124F_002D9FFC_002D4AC3_002D8F3D_002DAAB8E0240759_002Ff_003AList_00601_002Ecs_002Fl_003A_002E_002E_003F_002E_002E_003F_002E_002E_003F_002E_002E_003FAppData_003FRoaming_003FJetBrains_003FRider2025_002E1_003Fresharper_002Dhost_003FDecompilerCache_003Fdecompiler_003Fd3a451850004403293b134b9fe18ce3fc8f920_003Fca_003Fb76dc4c1_003FList_00601_002Ecs/@EntryIndexedValue">ForceIncluded</s:String>
 	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=7020124F_002D9FFC_002D4AC3_002D8F3D_002DAAB8E0240759_002Ff_003AMethodInfo_002Ecs_002Fl_003A_002E_002E_003F_002E_002E_003F_002E_002E_003F_002E_002E_003FAppData_003FRoaming_003FJetBrains_003FRider2025_002E1_003Fresharper_002Dhost_003FDecompilerCache_003Fdecompiler_003Fd3a451850004403293b134b9fe18ce3fc8f920_003F0d_003Fab46b071_003FMethodInfo_002Ecs/@EntryIndexedValue">ForceIncluded</s:String>
 	<s:String x:Key="/Default/Environment/UnitTesting/UnitTestSessionStore/Sessions/=340a7882_002De083_002D4138_002Db39e_002D91dc1db5c856/@EntryIndexedValue">&lt;SessionState ContinuousTestingMode="0" IsActive="True" Name="SaveChanges_ArrayRemove_UsesPullOperation" xmlns="urn:schemas-jetbrains-com:jetbrains-ut-session"&gt;&#xD;
-  &lt;TestAncestor&gt;&#xD;
-    &lt;TestId&gt;xUnit::AEB396C0-C2AF-4E62-876C-347116151218::net8.0::MongoCTLite.Tests.ArrayOperationsTests.SaveChanges_ArrayRemove_UsesPullOperation&lt;/TestId&gt;&#xD;
-    &lt;TestId&gt;xUnit::AEB396C0-C2AF-4E62-876C-347116151218::net8.0::MongoCTLite.Tests.ArrayOperationsTests.SaveChanges_ArrayAppend_UsesPushOperation&lt;/TestId&gt;&#xD;
-  &lt;/TestAncestor&gt;&#xD;
+  &lt;Project Location="C:\Users\user\Desktop\Git\MongoCTLite\MongoCTLite\MongoCTLite.Tests" Presentation="&amp;lt;MongoCTLite.Tests&amp;gt;" /&gt;&#xD;
 &lt;/SessionState&gt;</s:String>
 	<s:String x:Key="/Default/Environment/UnitTesting/UnitTestSessionStore/Sessions/=b8c3b635_002Dd6ae_002D47d3_002Da118_002D8a3f7eddf679/@EntryIndexedValue">&lt;SessionState ContinuousTestingMode="0" Name="Replace_preserves_id_and_increments_version" xmlns="urn:schemas-jetbrains-com:jetbrains-ut-session"&gt;&#xD;
   &lt;TestAncestor&gt;&#xD;
